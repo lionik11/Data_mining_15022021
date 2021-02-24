@@ -5,6 +5,8 @@ import requests
 
 
 class Parse5ka:
+    categories_list = []
+    category = {}
     params = {'store': None,
               'records_per_page': 12,
               'page': 1,
@@ -23,13 +25,6 @@ class Parse5ka:
         self.save_path = save_path
         self.categories_url = categories_url
 
-    def _get_response(self, url):
-        while True:
-            response = requests.get(url, params=self._set_params(), headers=self.headers)
-            if response.status_code == 200:
-                return response
-            time.sleep(0.5)
-
     def _get_categories_response(self):
         while True:
             response = requests.get(self.categories_url)
@@ -37,25 +32,40 @@ class Parse5ka:
                 return response
             time.sleep(0.5)
 
-    def _set_params(self):
+    def _get_category(self):
         response = self._get_categories_response()
         data: list = response.json()
-        for k in data:
-            self.params['categories'] = k['parent_group_code']
-            return self.params
+        for category in data:
+            yield category
+
+    def _set_params(self):
+        for category in self._get_category():
+            if category not in self.categories_list:
+                self.params['categories'] = category['parent_group_code']
+                self.categories_list.append(category)
+                self.category = category
+                return self.params
 
     def run(self):
         for product in self._parse(self.start_url):
-            product_path = self.save_path.joinpath(f"{product['id']}.json")
+            category = self.category
+            product_path = self.save_path.joinpath(f"{category['parent_group_name']}.json")
             self._save(product, product_path)
 
+    def _get_response(self, url):
+        params = self._set_params()
+        response = requests.get(url, params=params, headers=self.headers)
+        if response.status_code == 200:
+            return response
+        time.sleep(0.5)
+
     def _parse(self, url: str):
-        while url:
-            response = self._get_response(url)
-            data: dict = response.json()
-            url = data['next']
-            for product in data["results"]:
-                yield product
+        for i in self._get_category():
+            while url:
+                response = self._get_response(url)
+                data: dict = response.json()
+                url = data['next']
+                yield data["results"]
 
     def _save(self, data: dict, file_path: Path):
         file_path.write_text(json.dumps(data, ensure_ascii=False))
